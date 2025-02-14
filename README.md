@@ -9,7 +9,7 @@ Using Xstate, Cloudflare Workers, Durable Objects, Websockets, Workflows, Queues
 Based on Workflow-live of [Jordan Coeyman](https://x.com/acoyfellow) at https://github.com/acoyfellow/workflow-live
 
 ## Demo
-Try it live at [workflow-xstate.boxofapps.workers.dev](https://workflow-xstate.boxofapps.workers.dev/)
+Try it live at [xstate-workflow.boxofapps.workers.dev](https://xstate-workflow.boxofapps.workers.dev/)
 
 ### Installation
 
