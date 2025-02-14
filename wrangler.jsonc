@@ -1,0 +1,60 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "xstate-workflow",
+  "main": "./src/index.ts",
+  "compatibility_date": "2025-02-14",
+
+  "observability": {
+    "enabled": true
+  },
+
+  "assets": {
+    "directory": "src/static"
+  },
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "XSTATE_DO",
+        "class_name": "WebSocketDO"
+      }
+    ]
+  },
+
+  "workflows": [
+    {
+      "name": "xstate-workflow",
+      "binding": "XSTATE_WORKFLOW",
+      "class_name": "XstateWorkflow"
+    }
+  ],
+
+  // TODO: for some reason could not get KV to work properly, using DO storage instead
+  // "kv_namespaces": [
+  //   {
+  //     "binding": "WORKFLOW_KV",
+  //     "id": "8bcd78dc2368472abe744b03fd0a4950"
+  //   }
+  // ],
+
+  "queues": {
+    "producers": [
+      {
+        "queue": "xstate-workflow-jobs",
+        "binding": "XSTATE_WORKFLOW_JOBS"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "xstate-workflow-jobs"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["WebSocketDO"]
+    }
+  ]
+}
