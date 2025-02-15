@@ -11,6 +11,11 @@ Based on Workflow-live of [Jordan Coeyman](https://x.com/acoyfellow) at https://
 ## Demo
 Try it live at [xstate-workflow.boxofapps.workers.dev](https://xstate-workflow.boxofapps.workers.dev/)
 
+## Xstate Machine
+
+![image](https://github.com/user-attachments/assets/0d2c2ad6-99b4-4664-b025-1ccdb8e04859)
+
+
 ### Installation
 
 ```
