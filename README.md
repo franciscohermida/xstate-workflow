@@ -19,6 +19,8 @@ Try it live at [xstate-workflow.boxofapps.workers.dev](https://xstate-workflow.b
 
 Each workflow "run cycle" is assigned a unique ID. We use this ID to intentionally introduce non-determinism into our steps (the opposite of what is suggested in the best practices section) and dynamically decide which step to run using the xstate machine.
 
+In this current machine, the steps could be deterministic because they only get executed once. But I'm experimenting this thinking of more complex machines where you can have states repeating which would mean steps repeating. You can decide if it is deterministic or not depending on your use case.
+
 Ideally, the workflow would pause until an event with a payload wakes it up. Unfortunately, this feature is not yet available, though it appears to be coming soon according to the [changelog](https://developers.cloudflare.com/changelog/2025-01-15-workflows-more-steps/).
 
 For now, the workaround is to receive the payload at a custom worker endpoint, save it in KV or Durable Object storage, and then resume the workflow so it can check for the payload from the storage.
@@ -35,6 +37,7 @@ For now, the workaround is to receive the payload at a custom worker endpoint, s
 
 - Investigate creating a base class that delegates control to the xstate machine. For example, a class like `export class MyWorkflow extends XstateWorkflowEntrypoint<Env>` could allow you to configure the machine and define steps for each state change.
 - Explore ways to structured the code to make it possible to cache the result of each step and use it as context for the subsequent step
+- Does it even make any sense to use a Workflow for this? Wouldn't it be so much easier just using the durable object? Identify the value of using Workflows vs the alternative of not using it.
 
 ---
 
