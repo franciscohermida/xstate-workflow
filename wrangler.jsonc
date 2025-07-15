@@ -1,15 +1,15 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "xstate-workflow",
-  "main": "./src/index.ts",
-  "compatibility_date": "2025-02-14",
+  "main": "./server/index.ts",
+  "compatibility_date": "2025-07-15",
 
   "observability": {
     "enabled": true
   },
 
   "assets": {
-    "directory": "src/static"
+    "directory": "server/static"
   },
 
   "durable_objects": {

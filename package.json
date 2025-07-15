@@ -6,11 +6,11 @@
     "dev": "wrangler dev"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250204.0",
-    "typescript": "^5.0.4",
-    "wrangler": "^3.107.3"
+    "@cloudflare/workers-types": "^4.20250715.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.24.3"
   },
   "dependencies": {
-    "xstate": "^5.19.2"
+    "xstate": "^5.20.1"
   }
 }

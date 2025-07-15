@@ -10,8 +10,8 @@ export default {
       return env.XSTATE_DO.get(id).fetch(req);
     }
     if (url.pathname === "/api/workflow") {
-      const { id } = await env.XSTATE_WORKFLOW.create({});
-      return Response.json({ id });
+      const workflow = await env.XSTATE_WORKFLOW.create();
+      return Response.json({ id: workflow.id });
     }
     if (url.pathname.startsWith("/api/workflow/")) {
       const id = url.pathname.split("/").pop();
