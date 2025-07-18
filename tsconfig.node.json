@@ -1,0 +1,30 @@
+{
+  "extends": ["@tsconfig/node22/tsconfig.json"],
+  "include": [
+    "vite.config.*",
+    "vitest.config.*",
+    "cypress.config.*",
+    "playwright.config.*",
+    "postcss.config.*",
+    "tailwind.config.*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/server/*": ["./server/*"]
+    },
+
+    "strict": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true
+  }
+}

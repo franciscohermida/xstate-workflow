@@ -1,12 +1,36 @@
-import { EventFromLogic, ContextFrom, setup } from "xstate";
+import { type ContextFrom, setup, type ActorRefFrom, assign } from "xstate";
+import z from "zod";
+
+export const MyMachineEventsSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("process"),
+  }),
+  z.object({
+    type: z.literal("processed"),
+    output: z.number(),
+  }),
+  z.object({
+    type: z.literal("error"),
+    errorMessage: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("approved"),
+  }),
+  z.object({
+    type: z.literal("rejected"),
+  }),
+]);
+
+export type MyMachineEvents = z.infer<typeof MyMachineEventsSchema>;
 
 export const myMachine = setup({
   types: {
-    events: {} as { type: "process" } | { type: "processed" } | { type: "received" },
-    context: {},
+    events: {} as MyMachineEvents,
+    context: {} as { input?: number; output?: number; errorMessage?: string },
   },
+  actors: {},
 }).createMachine({
-  /** @xstate-layout N4IgpgJg5mDOIC5QFsCeBZAhgYwBYEsA7MAOgFVCAHAJwHts5ZIBiAbQAYBdRUS22fABd8tQjxAAPRAEYAnACYSANnkAWWbIAc7AKwBmfTs06ANCFSJNekrPUbN8+XvZ6lO1QF8PZtFjxFSAAU6BlgBQihmGnpGSA5uJBA+AWFRcSkEVXlpEgB2FXVHHVzZaR13MwsEBxJVOy01fU0HWS8fDBwCYhIAdUwhIigAAgBJKgBXQWZqMAZ8ADc4rnFkgbTEjNzpdhJy9nZpfOklTVlc03NLRTqNBtUmlq9vEEJaCDhxX06Alf41sQ2iAAtEpKsClCR9lDoTDcm0QF9-N0KNFQkwIL8UiIAaAMlkwdVFO5bpolHp5JppJpVHDnoiukEQrEMYlVqkcZJLAZavIdAclNIKUo6tICZSSPJblo3NI6oV4fSAiRgjEwoNMf90oghTZBepiTo5BSxUT6qTyZTqbT2n4Gb1+sIIqMJoINeytQgdEodqo9Odjny9LIlFsTbszWSKVSaU8PEA */
+  /** @xstate-layout N4IgpgJg5mDOIC5QFsCeBZAhgYwBYEsA7MAYgCoBtABgF1FQAHAe1nwBd8nD6QAPRAOwAmAHQBGABwCALAE5pANiEKJQoWKEAaEKkTqAzCNlUqsgKwKBCsxIkqAvve1oseImBEBVQgwBOTbDhYSBI-AKDqOiQQZlYOLh5+BCFVEUsLfVl5WwEzfQVtXQQVESkqBWkqMXKpYX1HZwwcAmIRAGUwQggiKAACABUmXoBFAFcwcdD-QNhgiEieWPZObmiklTFSqiEzZQkxfQ1cwsRFESppCwsBfSoJfQFVBpAXZvd2zu7CPsGR8cmwjM5hQxFFGCxlgk1ogFJYRMJcgpZEorDcJCcEGJpKJTGppGIzBd5NIBM9Xm5WgB1TDLb69ABiTF8vQAggwwgA3TAAGxImHZ-g5kAW0SW8VWoCSYjExjSsIkphMQmxGJKZVhAgulTsNzJTQpHmptL6jOZbM5PJIvjAACswNg2MLaIsIeLEohqgS0jd9NIFfiSRihOVxNJ9GZCVjbg8CXrXC0PB0uj0BkMxhNSGBfP5fEmvlBBunxiLwXEVu7itYjGIFKZZEIBLlAzo9IcRL7bDWZdtdvlHE4QIQmBA4DxyQmXWWoZK9NJxFI5Io9mppWYMQBafEiHZhw5iRvSbHqONvVreQFBSCTyESviIcxGGRZEz3WTdgSqiQiEnlRf3SQKhIJ4GiI9JEPgsC4FeoquuW0KYr6ZjnPKJIVA8b76KqAjbsG1jCHYMr4kBA7ju8eYpr8RZgNebrwZcCilCSiIaDKwgFC2xRfj+FTZIcth3MBCYiEaHB0qarICkwXLcjRcEzggsgCJssjhgRJg9h+HElNxVjYlQmS5GYgnvAAotmTKydOd4IZcyEqMIhISMYAiyBiWJUN+R42Co2IKDWpL9kAA */
   id: "myMachine",
 
   context: () => {
@@ -17,29 +41,67 @@ export const myMachine = setup({
 
   states: {
     Unprocessed: {
-      always: "Processing",
-    },
-
-    Processed: {
-      type: "final"
-    },
-
-    Processing: {
       on: {
-        processed: {
-          target: "Waiting Input",
-          reenter: true
+        process: "Sending To Queue",
+      },
+    },
+
+    Finished: {
+      type: "final",
+    },
+
+    "Sending To Queue": {
+      on: {
+        processed: [
+          {
+            target: "Waiting For Approval",
+            actions: assign({
+              errorMessage: ({ event }) => `Output ${event.output} is less than 0.5`,
+            }),
+            guard: ({ event }) => event.output > 0.5,
+            reenter: true,
+          },
+          {
+            target: "Error",
+            reenter: true,
+          },
+        ],
+
+        error: {
+          target: "Error",
+          actions: assign({
+            errorMessage: ({ event }) => `Error sending to queue: ${event.errorMessage}`,
+          }),
         },
       },
     },
 
-    "Waiting Input": {
+    "Waiting For Approval": {
       on: {
-        received: "Processed"
-      }
-    }
+        approved: "Finished",
+        rejected: {
+          target: "Sending To Queue",
+          reenter: true,
+        },
+      },
+    },
+
+    Error: {
+      type: "final",
+    },
+  },
+
+  on: {
+    "*": {
+      // unknown event
+      description: `Catch All Invalid Events`,
+      target: ".Error",
+      actions: assign({
+        errorMessage: ({ event }) => `Unknown event: ${event.type}`,
+      }),
+    },
   },
 });
 
-export type MyMachineEvents = EventFromLogic<typeof myMachine>;
+export type MyMachineActor = ActorRefFrom<typeof myMachine>;
 export type MyMachineContext = ContextFrom<typeof myMachine>;

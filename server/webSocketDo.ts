@@ -1,11 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
+import type { Bindings } from "./bindings";
 
 // Simple WebSocket broadcaster
-export class WebSocketDO extends DurableObject<Env> {
+export class WebSocketDO extends DurableObject<Bindings> {
   sockets = new Set<WebSocket>();
-  env: Env;
+  env: Bindings;
 
-  constructor(state: DurableObjectState, env: Env) {
+  constructor(state: DurableObjectState, env: Bindings) {
     super(state, env);
     this.env = env;
   }
@@ -33,18 +34,47 @@ export class WebSocketDO extends DurableObject<Env> {
   async kvSet(key: string, value: string) {
     this.ctx.storage.put(key, value);
   }
+
   async kvGet(key: string) {
     return this.ctx.storage.get(key);
   }
+
   async kvDelete(key: string) {
     this.ctx.storage.delete(key);
   }
 
-  async broadcast({ id, message }: { id: string; message: string }) {
+  async addWorkflowInstanceId(workflowInstanceId: string) {
+    const existingWorkflowInstancesString = await this.kvGet("workflow-instances");
+    if (existingWorkflowInstancesString == null) {
+      await this.kvSet("workflow-instances", JSON.stringify([workflowInstanceId]));
+    } else {
+      const existingWorkflowInstancesSet = new Set(JSON.parse(existingWorkflowInstancesString as string));
+      existingWorkflowInstancesSet.add(workflowInstanceId);
+      await this.kvSet("workflow-instances", JSON.stringify(Array.from(existingWorkflowInstancesSet)));
+    }
+  }
+
+  async removeWorkflowInstanceId(workflowInstanceId: string) {
+    const existingWorkflowInstancesString = await this.kvGet("workflow-instances");
+    if (existingWorkflowInstancesString == null) {
+      return;
+    }
+    const existingWorkflowInstancesSet = new Set(JSON.parse(existingWorkflowInstancesString as string));
+    existingWorkflowInstancesSet.delete(workflowInstanceId);
+    await this.kvSet("workflow-instances", JSON.stringify(Array.from(existingWorkflowInstancesSet)));
+  }
+
+  async broadcast(event: { workflowInstanceId: string; type: string; payload: unknown }) {
+    await new Promise((res) => setTimeout(res, 1000));
     this.sockets.forEach(
       (ws) =>
         ws.readyState === WebSocket.OPEN &&
-        ws.send(JSON.stringify({ id, message, time: new Date().toISOString() }))
+        ws.send(
+          JSON.stringify({
+            ...event,
+            time: new Date().toISOString(),
+          }),
+        ),
     );
   }
 }

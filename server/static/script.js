@@ -6,10 +6,7 @@ const ws = new WebSocket(
 
 const workflowRows = new Map();
 
-ws.onmessage = (e) => {
-  const { id, message, time } = JSON.parse(e.data);
-  console.log("onmessage", { id, time, message });
-
+function createOrGetRow(id) {
   let row = workflowRows.get(id);
   if (!row) {
     const noWorkflows = document.getElementById("no-workflows");
@@ -19,27 +16,55 @@ ws.onmessage = (e) => {
     row.innerHTML = `
           <td class="p-2 border-b w-20 truncate">${id}</td>
           <td class="p-2 border-b message"></td>
-          <td class="p-2 border-b time">${new Date(
-            time
-          ).toLocaleTimeString()}</td>
+          <td class="p-2 border-b time"></td>
           <td class="p-2 border-b actions"></td>
         `;
 
     workflowRows.set(id, row);
   }
-  row.querySelector(".message").textContent = message;
-  row.querySelector(".time").textContent = new Date(time).toLocaleTimeString();
+  return row;
+}
+
+ws.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  console.log("onmessage", data);
+
+  let row = createOrGetRow(data.workflowInstanceId);
+
+  const rowMessageElement = row.querySelector(".message")
+  
+  row.querySelector(".time").textContent = new Date(data.time).toLocaleTimeString();
 
   const actionsTd = row.querySelector(".actions");
   actionsTd.innerHTML = ""; // Clear existing buttons
-  console.log("actionsTd", actionsTd);
-  if (message.includes("Waiting Input")) {
+
+  if (data.type === "workflow-status" && data.payload === "started") {
+    rowMessageElement.textContent = `${data.type}: ${data.payload}`;
     console.log("creating button");
     const processedBtn = document.createElement("button");
     actionsTd.appendChild(processedBtn);
-    processedBtn.id = "send-input";
-    processedBtn.textContent = "Send Input";
-    processedBtn.onclick = () => sendEvent(id, "received");
+    processedBtn.id = "send-processed";
+    processedBtn.textContent = "Process";
+    processedBtn.onclick = () => sendEvent(data.workflowInstanceId, {type: "xstate-event", payload: { type: "process" }});
+  }
+
+  else if (data.type === "xstate-state" && data.payload === "Waiting For Approval") {
+    console.log("creating button");
+    
+    const approvedBtn = document.createElement("button");
+    actionsTd.appendChild(approvedBtn);
+    approvedBtn.id = "send-approved";
+    approvedBtn.textContent = "Approve";
+    approvedBtn.onclick = () => sendEvent(data.workflowInstanceId, {type: "xstate-event", payload: { type: "approved" }});
+
+    const processedBtn = document.createElement("button");
+    actionsTd.appendChild(processedBtn);
+    processedBtn.id = "send-rejected";
+    processedBtn.textContent = "Reject";
+    processedBtn.onclick = () => sendEvent(data.workflowInstanceId, {type: "xstate-event", payload: { type: "rejected" }});
+  }
+  else {
+    rowMessageElement.textContent = `${data.type}: ${data.payload}`;
   }
 };
 
@@ -50,6 +75,7 @@ startBtn.onclick = async () => {
     const res = await fetch("/api/workflow", { method: "POST" });
     const { id } = await res.json();
     console.log("Started workflow:", id);
+    const row = createOrGetRow(id);
   } catch (err) {
     console.error("Failed to start workflow:", err);
   }
@@ -58,6 +84,6 @@ startBtn.onclick = async () => {
 async function sendEvent(id, event) {
   fetch("/api/workflow/" + id, {
     method: "POST",
-    body: JSON.stringify({ type: event }),
+    body: JSON.stringify(event),
   });
 }

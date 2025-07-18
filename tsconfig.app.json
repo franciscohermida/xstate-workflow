@@ -1,0 +1,21 @@
+{
+  "extends": ["@vue/tsconfig/tsconfig.dom.json"],
+  "include": ["env.d.ts", "src/**/*", "src/**/*.vue", "auto-imports.d.ts", "components.d.ts", "server/**/*"],
+  "exclude": ["src/**/__tests__/*"],
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "lib": ["es5", "es6", "es7", "esnext", "dom"],
+    "types": ["@cloudflare/workers-types/2023-07-01"],
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/server/*": ["./server/*"]
+    },
+
+    "strict": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true
+  }
+}

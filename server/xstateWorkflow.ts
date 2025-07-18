@@ -1,139 +1,178 @@
-import {
-  WorkflowEntrypoint,
-  WorkflowEvent,
-  WorkflowStep,
-} from "cloudflare:workers";
+import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { createActor } from "xstate";
-import { myMachine, MyMachineContext } from "./machines/myMachine";
+import { myMachine, type MyMachineContext, type MyMachineEvents } from "./machines/myMachine";
+import type { Bindings } from "./bindings";
 
-export class XstateWorkflow extends WorkflowEntrypoint<Env> {
-  private stub = this.env.XSTATE_DO.get(
-    this.env.XSTATE_DO.idFromName("broadcast")
-  );
-  private q = Promise.resolve();
-
+export class XstateWorkflow extends WorkflowEntrypoint<Bindings> {
   async run(event: WorkflowEvent<MyMachineContext>, step: WorkflowStep) {
     const runId = crypto.randomUUID();
 
-    const broadcast = (message: string) =>
-      (this.q = this.q.then(async () => {
-        console.log(`log: ${message}`);
-        await this.stub.broadcast({
-          id: event.instanceId,
-          message,
+    console.log(`Workflow started with runId: ${runId}`);
+
+    const globalWorkflowDOStub = this.env.XSTATE_DO.get(this.env.XSTATE_DO.idFromName("broadcast"));
+
+    async function broadcast(
+      args: Omit<Awaited<Parameters<typeof globalWorkflowDOStub.broadcast>[0]>, "workflowInstanceId">,
+    ) {
+      await globalWorkflowDOStub.broadcast({
+        workflowInstanceId: event.instanceId,
+        ...args,
+      });
+    }
+
+    await broadcast({
+      type: "workflow-status",
+      payload: "started",
+    });
+
+    await step.do("save-workflow-instance-id", async () => {
+      console.log("saving workflow instance id");
+      try {
+        await globalWorkflowDOStub.addWorkflowInstanceId(event.instanceId);
+      } catch (error) {
+        console.error("error saving workflow instance id", error);
+      }
+    });
+
+    console.log("getting persisted actor");
+
+    // this cannot be cached on a step, has to be executed on every run
+    const actor = await getPersistedActor(this.env, {
+      workflowInstanceId: event.instanceId,
+      initialContext: event.payload,
+    });
+
+    // you can choose starting the actor before or after step.waitForEvent<MyMachineEvents> depending if you want to manually start or not
+    actor.start();
+
+    while (actor.getSnapshot().status === "active") {
+      const eventReceived = await step.waitForEvent<MyMachineEvents>("Waiting for XState Event", {
+        type: "xstate-event",
+        timeout: "1 minute",
+      });
+
+      // this promise is supposed to handle promise actor invoke (still investigating if this can be used)
+      const next = await new Promise<boolean>(async (res) => {
+        actor.subscribe({
+          next: async () => {
+            res(true);
+          },
         });
-      }));
 
-    const xEventKey = `${event.instanceId}:event`;
-    const xEvent = JSON.parse((await this.stub.kvGet(xEventKey)) ?? "null");
-
-    let persistedSnapshot = undefined;
-    const snapshotKey = `${event.instanceId}:snapshot`;
-    const snapshotRaw = await this.stub.kvGet(snapshotKey);
-    if (snapshotRaw != null) persistedSnapshot = JSON.parse(snapshotRaw);
-
-    const actor = createActor(myMachine, { snapshot: persistedSnapshot });
-
-    type SubEvent =
-      | { type: "next" }
-      | { type: "error"; error: any }
-      | { type: "completed" };
-
-    let subEvent: SubEvent = await new Promise((res) => {
-      actor.start();
-
-      actor.subscribe({
-        next: async (snapshot) => {
-          console.log(
-            `actor.subscribe.next: ${JSON.stringify(snapshot.value)}`
-          );
-          res({ type: "next" });
-        },
-        error: (error) => {
-          console.log(`actor.subscribe.error: ${error?.message}`);
-          res({ type: "error", error });
-        },
-        complete: () => {
-          console.log(`actor.subscribe.complete: ${JSON.stringify(snapshot)}`);
-          res({ type: "completed" });
-        },
+        actor.send(eventReceived.payload);
       });
 
       const snapshot = actor.getSnapshot();
 
-      if (xEvent == null) res({ type: "next" });
+      if (next) {
+        await broadcast({
+          type: "xstate-state",
+          payload: snapshot.value,
+        });
 
-      if (snapshot.can(xEvent)) {
-        actor.send(xEvent);
-      } else {
-        console.log(
-          `Invalid Event: ${JSON.stringify({
-            event: xEvent,
-            current: snapshot.value,
-          })}`
-        );
-        res({ type: "error", error: "Invalid Event" });
+        const stepName = `step: ${JSON.stringify(snapshot.value)} ${runId} `;
+
+        if (snapshot.matches("Sending To Queue")) {
+          try {
+            await step.do(stepName, async () => {
+              try {
+                const random = Math.random();
+                if (random > 0.2 || true) {
+                  throw new Error(`api error ${random}`);
+                }
+              } catch (error) {
+                const errorMessage = `step internal error (sending to queue): ${error}`;
+                console.log(errorMessage);
+                await broadcast({
+                  type: "workflow-status",
+                  payload: errorMessage,
+                });
+
+                throw error;
+              }
+            });
+          } catch (error) {
+            const errorMessage = `step error (sending to queue): ${error}`;
+            console.log(errorMessage);
+            await broadcast({
+              type: "workflow-status",
+              payload: errorMessage,
+            });
+            actor.send({ type: "error", errorMessage: "step error (sending to queue)" });
+          }
+        } else if (snapshot.matches("Waiting For Approval")) {
+          await new Promise((res) => setTimeout(res, 1000));
+        }
+      }
+
+      // persist the snapshot
+      await globalWorkflowDOStub.kvSet(getSnapshotKey(event.instanceId), JSON.stringify(actor.getPersistedSnapshot()));
+    }
+
+    await step.do("delete-workflow-instance-id", async () => {
+      try {
+        await globalWorkflowDOStub.removeWorkflowInstanceId(event.instanceId);
+      } catch (error) {
+        console.error("error removing workflow instance id", error);
       }
     });
 
-    // persist the snapshot
-    await this.stub.kvSet(
-      snapshotKey,
-      JSON.stringify(actor.getPersistedSnapshot())
-    );
+    if (actor.getSnapshot().status == "done") {
+      await globalWorkflowDOStub.kvDelete(getSnapshotKey(event.instanceId));
 
-    const snapshot = actor.getSnapshot();
-    console.log(`snapshot: ${JSON.stringify(snapshot)}`);
-
-    // clean up the event for the next run
-    await this.stub.kvDelete(xEventKey);
-
-    // TODO: figure out why subEvent.type "completed" is not working
-    if (snapshot.matches("Processed") || subEvent?.type === "completed") {
-      await this.stub.kvDelete(snapshotKey);
-
-      console.log("Workflow complete!");
-      await broadcast("Workflow complete!");
+      await broadcast({
+        type: "xstate-state",
+        payload: actor.getSnapshot().value,
+      });
+      await broadcast({
+        type: "workflow-status",
+        payload: `Completed`,
+      });
       return { success: true };
     }
 
-    if (subEvent?.type === "error") {
-      await this.stub.kvDelete(snapshotKey);
-
-      // Should this error the whole workflow?
-      await broadcast(`Workflow failed: ${subEvent.error.message}`);
-      return { success: false, error: subEvent.error.message };
+    if (actor.getSnapshot().status == "error") {
+      await globalWorkflowDOStub.kvDelete(getSnapshotKey(event.instanceId));
+      await broadcast({
+        type: "xstate-state",
+        payload: `Errored: ${JSON.stringify(actor.getSnapshot().error)}`,
+      });
+      await broadcast({
+        type: "workflow-status",
+        payload: `Errored: xstate error`,
+      });
+      return { success: false, error: actor.getSnapshot().error };
     }
 
-    if (subEvent?.type === "next") {
-      const stepName = `step: ${JSON.stringify(snapshot.value)} ${runId} `;
-
-      if (snapshot.matches("Processing")) {
-        // decide between deterministic step names or not depending if you want to cache the result
-        await step.do(stepName, async () => {
-          await broadcast(
-            `Sending to queue: ${JSON.stringify(snapshot.value)} ${runId}`
-          );
-
-          await this.env.XSTATE_WORKFLOW_JOBS.send({
-            workflowInstanceId: event.instanceId,
-          });
-
-          // We need to pause and only resume when  we receive an external event
-          // Solution from https://github.com/apeacock1991/workflows-wait-for-action/
-          // https://x.com/_ashleypeacock/status/1889693397293654503
-          const workflow = await this.env.XSTATE_WORKFLOW.get(event.instanceId);
-          await workflow.pause();
-        });
-      } else if (snapshot.matches("Waiting Input")) {
-        await step.do(stepName, async () => {
-          console.log("Waiting Input");
-          await broadcast(stepName);
-
-          const workflow = await this.env.XSTATE_WORKFLOW.get(event.instanceId);
-          await workflow.pause();
-        });
-      }
-    }
+    await broadcast({
+      type: "workflow-status",
+      payload: `Errored: Workflow ended unexpectedly`,
+    });
+    return { success: false, error: "Workflow ended unexpectedly" };
   }
+}
+
+function getSnapshotKey(workflowInstanceId: string) {
+  return `workflow:${workflowInstanceId}:snapshot`;
+}
+
+async function getDO(env: Bindings) {
+  const id = env.XSTATE_DO.idFromName("broadcast");
+  return env.XSTATE_DO.get(id);
+}
+
+async function getPersistedActor(
+  env: Bindings,
+  args: { workflowInstanceId: string; initialContext: MyMachineContext },
+) {
+  let persistedSnapshot = undefined;
+  const globalWorkflowDOStub = await getDO(env);
+  const snapshotRaw = await globalWorkflowDOStub.kvGet(getSnapshotKey(args.workflowInstanceId));
+  if (snapshotRaw != null) persistedSnapshot = JSON.parse(snapshotRaw);
+
+  const actor = createActor(myMachine.provide({}), {
+    snapshot: persistedSnapshot,
+  });
+
+  return actor;
 }
