@@ -17,7 +17,8 @@ Try it live at [xstate-workflow.boxofapps.workers.dev](https://xstate-workflow.b
 
 ## Xstate Machine
 
-![image](https://github.com/user-attachments/assets/0d2c2ad6-99b4-4664-b025-1ccdb8e04859)
+<img width="1233" height="368" alt="image" src="https://github.com/user-attachments/assets/09e285f3-f703-418e-9321-7e2bb773c6bc" />
+
 
 ## How It Works
 
