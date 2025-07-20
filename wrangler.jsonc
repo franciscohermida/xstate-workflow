@@ -3,58 +3,52 @@
   "name": "xstate-workflow",
   "main": "./server/index.ts",
   "compatibility_date": "2025-07-15",
-
+  "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   "observability": {
-    "enabled": true
+    "enabled": true,
   },
 
   "assets": {
-    "directory": "server/static"
+    "directory": "dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
   },
 
   "durable_objects": {
     "bindings": [
       {
-        "name": "XSTATE_DO",
-        "class_name": "WebSocketDO"
-      }
-    ]
+        "name": "DO",
+        "class_name": "XstateWorkflowDO",
+      },
+    ],
   },
 
   "workflows": [
     {
       "name": "xstate-workflow",
-      "binding": "XSTATE_WORKFLOW",
-      "class_name": "XstateWorkflow"
-    }
+      "binding": "WORKFLOW",
+      "class_name": "XstateWorkflow",
+    },
   ],
-
-  // TODO: for some reason could not get KV to work properly, using DO storage instead
-  // "kv_namespaces": [
-  //   {
-  //     "binding": "WORKFLOW_KV",
-  //     "id": "8bcd78dc2368472abe744b03fd0a4950"
-  //   }
-  // ],
 
   "queues": {
     "producers": [
       {
-        "queue": "xstate-workflow-jobs",
-        "binding": "XSTATE_WORKFLOW_JOBS"
-      }
+        "queue": "xstate-workflow-queue",
+        "binding": "QUEUE",
+      },
     ],
     "consumers": [
       {
-        "queue": "xstate-workflow-jobs"
-      }
-    ]
+        "queue": "xstate-workflow-queue",
+      },
+    ],
   },
 
   "migrations": [
     {
       "tag": "v1",
-      "new_classes": ["WebSocketDO"]
-    }
-  ]
+      "new_classes": ["XstateWorkflowDO"],
+    },
+  ],
 }

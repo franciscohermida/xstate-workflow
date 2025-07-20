@@ -1,4 +1,4 @@
-import { type ContextFrom, setup, type ActorRefFrom, assign } from "xstate";
+import { type ContextFrom, setup, type ActorRefFrom, assign, type StateValueFrom, type SnapshotFrom } from "xstate";
 import z from "zod";
 
 export const MyMachineEventsSchema = z.discriminatedUnion("type", [
@@ -55,14 +55,14 @@ export const myMachine = setup({
         processed: [
           {
             target: "Waiting For Approval",
-            actions: assign({
-              errorMessage: ({ event }) => `Output ${event.output} is less than 0.5`,
-            }),
-            guard: ({ event }) => event.output > 0.5,
+            guard: ({ event }) => event.output > 0.25,
             reenter: true,
           },
           {
             target: "Error",
+            actions: assign({
+              errorMessage: ({ event }) => `Output ${event.output} is less than 0.25`,
+            }),
             reenter: true,
           },
         ],
@@ -91,17 +91,20 @@ export const myMachine = setup({
     },
   },
 
-  on: {
-    "*": {
-      // unknown event
-      description: `Catch All Invalid Events`,
-      target: ".Error",
-      actions: assign({
-        errorMessage: ({ event }) => `Unknown event: ${event.type}`,
-      }),
-    },
-  },
+  // on: {
+  //   "*": {
+  //     // unknown event
+  //     description: `Catch All Invalid Events`,
+  //     target: ".Error",
+  //     actions: assign({
+  //       errorMessage: ({ event }) => `Unknown event: ${event.type}`,
+  //     }),
+  //   },
+  // },
 });
 
 export type MyMachineActor = ActorRefFrom<typeof myMachine>;
+export type MyMachineStateValue = StateValueFrom<typeof myMachine>;
 export type MyMachineContext = ContextFrom<typeof myMachine>;
+export type MyMachineSnapshot = SnapshotFrom<typeof myMachine>;
+export type MyMachinePersistedSnapshot = ReturnType<MyMachineActor["getPersistedSnapshot"]>;

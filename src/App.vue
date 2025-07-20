@@ -6,20 +6,32 @@
         <div>
           <h1 class="text-2xl font-bold">Xstate Workflow Monitor</h1>
           <p class="text-sm text-gray-600 mt-1">
+            <span
+              :class="isConnected ? 'bg-green-500' : 'bg-red-500'"
+              class="inline-block w-2 h-2 rounded-full flex-shrink-0"
+            ></span>
             {{ connectionStatus }}
           </p>
         </div>
         <div class="flex gap-2">
           <button
-            :disabled="!isConnected || isStarting"
+            :disabled="isCreatingWorkflow"
             class="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            @click="startWorkflow"
+            @click="createWorkflow"
           >
-            <span v-if="isStarting">Starting...</span>
-            <span v-else>Start Workflow</span>
+            <span v-if="isCreatingWorkflow">Creating...</span>
+            <span v-else>Create Workflow</span>
           </button>
           <button
-            :disabled="workflows.length === 0"
+            :disabled="isLoadingWorkflows"
+            class="bg-green-500 text-white py-2 px-4 rounded-md hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            @click="loadWorkflows"
+          >
+            <span v-if="isLoadingWorkflows">Loading...</span>
+            <span v-else>Refresh</span>
+          </button>
+          <button
+            :disabled="workflowsVms.length === 0"
             class="bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             @click="clearWorkflows"
           >
@@ -41,35 +53,50 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-if="workflows.length === 0" class="text-center">
+              <tr v-if="workflowsVms.length === 0" class="text-center">
                 <td colspan="4" class="p-8 text-gray-500">No workflows running</td>
               </tr>
-              <tr v-for="workflow in workflows" :key="workflow.id" class="border-b hover:bg-gray-50 transition-colors">
+              <tr
+                v-for="workflow in workflowsVms"
+                :key="workflow.id"
+                class="border-b hover:bg-gray-50 transition-colors"
+              >
                 <td class="p-4 font-mono text-xs w-32">
-                  <span class="bg-gray-100 px-2 py-1 rounded truncate block">{{ workflow.id }}</span>
+                  <span class="bg-gray-100 px-2 py-1 rounded truncate block" @click="getWorkflow(workflow.id)">{{
+                    workflow.id
+                  }}</span>
                 </td>
                 <td class="p-4">
                   <div class="space-y-1 min-w-0">
                     <div class="flex items-center gap-2 min-w-0">
                       <span
-                        :class="getStatusColor(workflow.workflowStatus)"
+                        :class="workflow.workflowStatusColor"
                         class="inline-block w-2 h-2 rounded-full flex-shrink-0"
                       ></span>
                       <span class="text-xs text-gray-600 flex-shrink-0">Workflow:</span>
-                      <span class="font-medium text-sm truncate">{{ workflow.workflowStatus || "Not set" }}</span>
+                      <span class="font-medium text-xs">{{ workflow.workflowStatus || "Not set" }}</span>
                     </div>
                     <div class="flex items-center gap-2 min-w-0">
                       <span
-                        :class="getStatusColor(workflow.xstateState)"
+                        :class="workflow.xstateStateValueColor"
                         class="inline-block w-2 h-2 rounded-full flex-shrink-0"
                       ></span>
                       <span class="text-xs text-gray-600 flex-shrink-0">XState:</span>
-                      <span class="font-medium text-sm truncate">{{ workflow.xstateState || "Not set" }}</span>
+                      <span class="font-medium text-xs">{{ workflow.xstateStatus }}</span>
                     </div>
                   </div>
                 </td>
                 <td class="p-4 text-gray-600 w-32">
-                  <span class="text-xs">{{ formatTime(workflow.lastUpdate) }}</span>
+                  <div :key="workflow.instance.updatedAt.getTime()" class="text-xs relative">
+                    <div>
+                      {{ formatTime(workflow.instance.updatedAt) }}
+                    </div>
+                    <div
+                      class="absolute inset-0 text-blue-400 font-bold animate-in fade-in direction-reverse fill-mode-forwards duration-500 ease-out"
+                    >
+                      {{ formatTime(workflow.instance.updatedAt) }}
+                    </div>
+                  </div>
                 </td>
                 <td class="p-4 w-48">
                   <div class="flex gap-2 flex-wrap">
@@ -120,30 +147,46 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { WebSocket } from "partysocket";
-
-// Types
-interface WorkflowData {
-  id: string;
-  workflowStatus: string | undefined;
-  xstateState: string | undefined;
-  lastUpdate: Date;
-  canProcess: boolean;
-  canApprove: boolean;
-  canReject: boolean;
-}
-
-interface WebSocketMessage {
-  workflowInstanceId: string;
-  type: string;
-  payload: string;
-  time: string;
-}
+import { orderBy } from "es-toolkit";
+import type { WorkflowInstanceData, WorkflowStateValue } from "../server/workflow";
+import { myMachine, type MyMachineEvents } from "../server/machines/myMachine";
+import { createActor } from "xstate";
 
 // Reactive state
-const workflows = ref<WorkflowData[]>([]);
+const workflows = ref<WorkflowInstanceData[]>([]);
+const workflowsVms = computed(() =>
+  orderBy(workflows.value, [(w) => w.createdAt], ["desc"]) // Sort by created date, newest first
+    .map((w) => {
+      const actor = createActor(myMachine, {
+        snapshot: w.xstateSnapshot ?? undefined,
+      });
+
+      const snapshot = actor.getSnapshot();
+      const xstateStateValue = snapshot.value;
+
+      return {
+        id: w.id,
+        instance: w,
+        canProcess:
+          (w.workflowStateValue === "Waiting For Event" || w.workflowStateValue === "Running") &&
+          xstateStateValue === "Unprocessed",
+        canApprove: w.workflowStateValue !== "Errored" && xstateStateValue === "Waiting For Approval",
+        canReject: w.workflowStateValue !== "Errored" && xstateStateValue === "Waiting For Approval",
+        workflowStatus: w.workflowStatusMessage
+          ? `${w.workflowStateValue ?? "Unknown"}: ${w.workflowStatusMessage}`
+          : (w.workflowStateValue ?? "Not set"),
+        xstateStatus: snapshot.context.errorMessage
+          ? `${xstateStateValue ?? "Unknown"}: ${snapshot.context.errorMessage}`
+          : (xstateStateValue ?? "Not set"),
+        xstateStateValue,
+        workflowStatusColor: getWorkflowStatusColor(w.workflowStateValue),
+        xstateStateValueColor: getXstateStatusColor(xstateStateValue),
+      };
+    }),
+);
 const isConnected = ref(false);
-const isStarting = ref(false);
-const ws = ref<WebSocket | null>(null);
+const isCreatingWorkflow = ref(false);
+const isLoadingWorkflows = ref(false);
 
 // Computed properties
 const connectionStatus = computed(() => {
@@ -152,64 +195,42 @@ const connectionStatus = computed(() => {
 });
 
 // Methods
-function createOrUpdateWorkflow(id: string, type: string, payload: string, time: string) {
-  const existingIndex = workflows.value.findIndex((w) => w.id === id);
+function createOrUpdateWorkflow(data: WorkflowInstanceData) {
+  const existingIndex = workflows.value.findIndex((w) => w.id === data.id);
 
-  if (existingIndex >= 0) {
-    // Update existing workflow
+  if (workflows.value[existingIndex] != null) {
     const existing = workflows.value[existingIndex];
-    if (!existing) return; // Safety check
 
-    const updatedWorkflow: WorkflowData = {
-      id: existing.id,
-      workflowStatus: existing.workflowStatus,
-      xstateState: existing.xstateState,
-      lastUpdate: new Date(time),
-      canProcess: existing.canProcess,
-      canApprove: existing.canApprove,
-      canReject: existing.canReject,
-    };
-
-    // Update based on message type
-    if (type === "workflow-status") {
-      updatedWorkflow.workflowStatus = payload;
-      // Reset action flags and set based on current status
-      updatedWorkflow.canProcess = payload === "started";
-      updatedWorkflow.canApprove = false;
-      updatedWorkflow.canReject = false;
-    } else if (type === "xstate-state") {
-      updatedWorkflow.xstateState = payload;
-      // Reset action flags and set based on current state
-      updatedWorkflow.canProcess = false;
-      updatedWorkflow.canApprove = payload === "Waiting For Approval";
-      updatedWorkflow.canReject = payload === "Waiting For Approval";
-    }
-
-    workflows.value[existingIndex] = updatedWorkflow;
+    Object.assign(existing, {
+      ...data,
+      createdAt: new Date(data.createdAt),
+      updatedAt: new Date(data.updatedAt),
+    });
   } else {
-    // Create new workflow
-    const newWorkflow: WorkflowData = {
-      id: id,
-      workflowStatus: type === "workflow-status" ? payload : undefined,
-      xstateState: type === "xstate-state" ? payload : undefined,
-      lastUpdate: new Date(time),
-      canProcess: type === "workflow-status" && payload === "started",
-      canApprove: type === "xstate-state" && payload === "Waiting For Approval",
-      canReject: type === "xstate-state" && payload === "Waiting For Approval",
+    const newWorkflow: WorkflowInstanceData = {
+      ...data,
+      createdAt: new Date(data.createdAt),
+      updatedAt: new Date(data.updatedAt),
     };
 
     workflows.value.unshift(newWorkflow);
   }
 }
 
-function getStatusColor(message: string | undefined): string {
+function getWorkflowStatusColor(message: WorkflowStateValue | null | undefined): string {
   if (!message) return "bg-gray-300";
   if (message.includes("Starting...") || message.includes("Initializing")) return "bg-gray-400";
-  if (message.includes("started")) return "bg-green-500";
+  if (message.includes("Completed")) return "bg-green-500";
+  if (message.includes("Error")) return "bg-red-500";
+  return "bg-gray-500";
+}
+
+function getXstateStatusColor(message: string | undefined): string {
+  if (!message) return "bg-gray-300";
+  if (message.includes("Unprocessed")) return "bg-gray-400";
   if (message.includes("Waiting For Approval")) return "bg-yellow-500";
-  if (message.includes("approved")) return "bg-blue-500";
-  if (message.includes("rejected")) return "bg-red-500";
-  if (message.includes("processed")) return "bg-purple-500";
+  if (message.includes("Error")) return "bg-red-500";
+  if (message.includes("Finished")) return "bg-green-500";
   return "bg-gray-500";
 }
 
@@ -217,35 +238,20 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString();
 }
 
-async function startWorkflow() {
-  if (!isConnected.value || isStarting.value) return;
+async function createWorkflow() {
+  if (isCreatingWorkflow.value) return;
 
-  isStarting.value = true;
+  isCreatingWorkflow.value = true;
   try {
-    const res = await fetch("/api/workflow", { method: "POST" });
-    const data = (await res.json()) as { id: string };
-    console.log("Started workflow:", data.id);
-
-    // Immediately add the workflow to the list
-    const newWorkflow: WorkflowData = {
-      id: data.id,
-      workflowStatus: undefined,
-      xstateState: undefined,
-      lastUpdate: new Date(),
-      canProcess: false,
-      canApprove: false,
-      canReject: false,
-    };
-
-    workflows.value.unshift(newWorkflow);
+    await fetch("/api/workflow", { method: "POST" });
   } catch (err) {
     console.error("Failed to start workflow:", err);
   } finally {
-    isStarting.value = false;
+    isCreatingWorkflow.value = false;
   }
 }
 
-async function sendEvent(id: string, event: { type: string }) {
+async function sendEvent(id: string, event: MyMachineEvents) {
   try {
     await fetch(`/api/workflow/${id}`, {
       method: "POST",
@@ -259,37 +265,66 @@ async function sendEvent(id: string, event: { type: string }) {
   }
 }
 
-function clearWorkflows() {
+async function loadWorkflows() {
+  isLoadingWorkflows.value = true;
+  try {
+    const res = await fetch("/api/workflow/list");
+    const data = (await res.json()) as { workflowInstances: WorkflowInstanceData[] };
+    console.log("data", data);
+
+    // Convert date strings back to Date objects and replace the entire workflows array
+    const updatedWorkflows = data.workflowInstances.map((instance) => ({
+      ...instance,
+      createdAt: new Date(instance.createdAt),
+      updatedAt: new Date(instance.updatedAt),
+    }));
+
+    // Replace the entire workflows array to ensure removed workflows are not shown
+    workflows.value = updatedWorkflows;
+  } catch (err) {
+    console.error("Failed to load workflows:", err);
+  } finally {
+    isLoadingWorkflows.value = false;
+  }
+}
+
+async function clearWorkflows() {
+  await fetch("/api/workflow/clear", { method: "POST" });
   workflows.value = [];
 }
 
-function setupWebSocket() {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${location.host}/ws`;
+async function getWorkflow(id: string) {
+  const res = await fetch(`/api/workflow/get/${id}`);
+  const data = (await res.json()) as { workflowInstanceData: WorkflowInstanceData; workflowStatus: InstanceStatus };
 
-  ws.value = new WebSocket(wsUrl);
+  // Convert date strings back to Date objects (JSON deserialization converts Dates to strings)
+  if (data.workflowInstanceData) {
+    data.workflowInstanceData.createdAt = new Date(data.workflowInstanceData.createdAt);
+    data.workflowInstanceData.updatedAt = new Date(data.workflowInstanceData.updatedAt);
+  }
+
+  console.log("Workflow:", data);
+  return data;
+}
+
+const ws = ref<WebSocket | null>(null);
+function setupWebSocket() {
+  const wsUrl = `${location.origin}/api/ws`;
+
+  ws.value = new WebSocket(wsUrl, undefined, { debug: true });
 
   ws.value.onopen = () => {
     isConnected.value = true;
-    console.log("WebSocket connected");
   };
 
   ws.value.onmessage = (e) => {
-    const data: WebSocketMessage = JSON.parse(e.data);
-    console.log("WebSocket message:", data);
-
-    createOrUpdateWorkflow(data.workflowInstanceId, data.type, data.payload, data.time);
+    console.log("WebSocket message:", e.data);
+    const data = JSON.parse(e.data) as WorkflowInstanceData;
+    createOrUpdateWorkflow(data);
   };
 
   ws.value.onclose = () => {
     isConnected.value = false;
-    console.log("WebSocket disconnected");
-    // Attempt to reconnect after 3 seconds
-    setTimeout(() => {
-      if (ws.value?.readyState === WebSocket.CLOSED) {
-        setupWebSocket();
-      }
-    }, 3000);
   };
 
   ws.value.onerror = (error) => {
@@ -301,6 +336,7 @@ function setupWebSocket() {
 // Lifecycle
 onMounted(() => {
   setupWebSocket();
+  loadWorkflows();
 });
 
 onUnmounted(() => {
@@ -309,7 +345,3 @@ onUnmounted(() => {
   }
 });
 </script>
-
-<style scoped>
-/* Additional custom styles can be added here */
-</style>

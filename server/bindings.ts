@@ -1,7 +1,8 @@
-import type { WebSocketDO } from "./webSocketDo";
+import { XstateWorkflowDO } from "./workflowDO";
 
 export type Bindings = {
-  XSTATE_DO: DurableObjectNamespace<WebSocketDO>;
-  XSTATE_WORKFLOW_JOBS: Queue;
-  XSTATE_WORKFLOW: Workflow;
+  MODE: string;
+  DO: DurableObjectNamespace<XstateWorkflowDO>;
+  QUEUE: Queue;
+  WORKFLOW: Workflow;
 };
