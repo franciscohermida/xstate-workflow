@@ -1,6 +1,6 @@
-# Xstate Workflow Monitor
+# Xstate Workflow
 
-Using Xstate, Cloudflare Workers, Durable Objects, Websockets, Workflows, Queues.
+Using Xstate, Cloudflare Workflows, Durable Objects, Websockets, Queues, Vue.js.
 
 Multi-step approval workflow:
 
@@ -9,7 +9,7 @@ Multi-step approval workflow:
 3. Waits for user approval/rejection
 4. If rejected, retries processing until approved
 
-Based on Workflow-live of [Jordan Coeyman](https://x.com/acoyfellow) at https://github.com/acoyfellow/workflow-live
+Initially based on Workflow-live of [Jordan Coeyman](https://x.com/acoyfellow) at https://github.com/acoyfellow/workflow-live
 
 ## Demo
 
